@@ -416,6 +416,38 @@ export function getRankTitle(rank: Rank, profile?: PlayerProfile): string {
 
 // ---------- AI 解析工具 ----------
 
+function stripNarrationArtifacts(raw: string): string {
+  const text = raw
+    .replace(/<think>[\s\S]*?<\/think>/g, '')
+    .replace(/```json[\s\S]*?```/g, '')
+    .replace(/```[\s\S]*?```/g, '')
+    // 清理模型偶发附带在剧情末尾的属性/状态原始文本
+    .replace(/\n{1,2}(?:(?:当前)?(?:属性|数值|状态|Stats?)\s*[:：][\s\S]*|(?:宠爱|心机|健康|势力|银两|智慧|德行|狠毒|favor|scheming|health|influence|silver|wisdom|virtue|cruelty|episode|集数|回合|存活)\s*[:：][\s\S]*)$/i, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  return text || '（剧情生成中，请稍候...）';
+}
+
+function sanitizeAIResponse(response: AIResponse): AIResponse {
+  const safeChoices = Array.isArray(response.choices)
+    ? response.choices
+        .filter((choice) => choice && typeof choice.text === 'string' && choice.text.trim())
+        .slice(0, 3)
+        .map((choice, index) => ({
+          id: typeof choice.id === 'number' ? choice.id : index + 1,
+          text: choice.text.replace(/\s+/g, ' ').trim(),
+        }))
+    : [];
+
+  return {
+    ...response,
+    narration: stripNarrationArtifacts(response.narration || ''),
+    choices: safeChoices,
+    stat_changes: response.stat_changes || {},
+  };
+}
+
 export function parseAIOutput(raw: string): AIResponse {
   // 去掉可能的思考过程 <think>...</think>
   let cleaned = raw.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
@@ -424,7 +456,7 @@ export function parseAIOutput(raw: string): AIResponse {
   // 1. ```json ... ```
   const jsonBlockMatch = cleaned.match(/```json\s*([\s\S]*?)\s*```/);
   if (jsonBlockMatch) {
-    return JSON.parse(jsonBlockMatch[1]);
+    return sanitizeAIResponse(JSON.parse(jsonBlockMatch[1]));
   }
 
   // 2. ``` ... ``` (无 json 标记)
@@ -432,7 +464,7 @@ export function parseAIOutput(raw: string): AIResponse {
   if (codeBlockMatch) {
     const inner = codeBlockMatch[1].trim();
     if (inner.startsWith('{')) {
-      return JSON.parse(inner);
+      return sanitizeAIResponse(JSON.parse(inner));
     }
   }
 
@@ -441,19 +473,14 @@ export function parseAIOutput(raw: string): AIResponse {
   const braceEnd = cleaned.lastIndexOf('}');
   if (braceStart !== -1 && braceEnd > braceStart) {
     const jsonStr = cleaned.slice(braceStart, braceEnd + 1);
-    return JSON.parse(jsonStr);
+    return sanitizeAIResponse(JSON.parse(jsonStr));
   }
 
   throw new Error('No valid JSON found in AI output');
 }
 
 export function cleanNarration(raw: string): string {
-  let text = raw
-    .replace(/<think>[\s\S]*?<\/think>/g, '')
-    .replace(/```json[\s\S]*?```/g, '')
-    .replace(/```[\s\S]*?```/g, '')
-    .trim();
-  return text || '（剧情生成中，请稍候...）';
+  return stripNarrationArtifacts(raw);
 }
 
 // ---------- 存档系统 ----------

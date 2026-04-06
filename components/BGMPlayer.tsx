@@ -6,6 +6,7 @@ export default function BGMPlayer() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [hasAudio, setHasAudio] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const shouldResumeRef = useRef(false);
 
   useEffect(() => {
     // 检测 bgm.mp3 是否存在
@@ -13,6 +14,19 @@ export default function BGMPlayer() {
     audioRef.current = audio;
     audio.loop = true;
     audio.volume = 0.3;
+
+    const tryResume = () => {
+      if (!shouldResumeRef.current || !audioRef.current) return;
+      audioRef.current.play().then(() => {
+        setIsPlaying(true);
+      }).catch(() => {
+        // 浏览器仍可能阻止播放，忽略即可
+      });
+      shouldResumeRef.current = false;
+      document.removeEventListener("click", tryResume);
+      document.removeEventListener("touchstart", tryResume);
+      document.removeEventListener("keydown", tryResume);
+    };
 
     audio.addEventListener("canplaythrough", () => {
       setHasAudio(true);
@@ -25,10 +39,16 @@ export default function BGMPlayer() {
     // 恢复用户偏好
     const saved = localStorage.getItem("bgm_enabled");
     if (saved === "true") {
-      // 标记意图，等用户交互后再播放
+      shouldResumeRef.current = true;
+      document.addEventListener("click", tryResume, { once: true });
+      document.addEventListener("touchstart", tryResume, { once: true });
+      document.addEventListener("keydown", tryResume, { once: true });
     }
 
     return () => {
+      document.removeEventListener("click", tryResume);
+      document.removeEventListener("touchstart", tryResume);
+      document.removeEventListener("keydown", tryResume);
       audio.pause();
       audio.src = "";
     };
