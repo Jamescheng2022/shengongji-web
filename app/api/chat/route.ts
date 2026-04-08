@@ -90,8 +90,8 @@ export async function POST(req: Request) {
   // ========== 构建系统Prompt（支持章节摘要）==========
   let systemPrompt = buildSystemPrompt(gameState);
 
-  // 在第11集之后，如果有章节摘要，注入到Prompt中
-  if (gameState.currentEpisode > 10 && gameState.chapterSummaries.length > 0) {
+  // 从第5集开始注入章节摘要（提前至5集，原为11集）
+  if (gameState.currentEpisode > 5 && gameState.chapterSummaries.length > 0) {
     const recentSummaries = getRecentSummaries(gameState, 2);
     const summaryText = formatSummariesForPrompt(recentSummaries);
     if (summaryText) {
@@ -230,123 +230,283 @@ export async function POST(req: Request) {
   }
 }
 
-// ========== 内置剧情引擎（无API时使用） ==========
+// ========== 内置剧情引擎（无API时使用）==========
 
+/**
+ * 基于游戏状态（flags + episode）驱动的剧情选择
+ * 替换旧的关键词匹配方式，确保剧情连贯一致
+ */
 function generateFallbackStory(state: GameState, input: string): AIResponse {
   const ep = state.currentEpisode;
-  const pool = getStoryPool(ep, state, input);
-  const story = pool[Math.floor(Math.random() * pool.length)];
-  return story;
+  const flags = new Set(state.flags || []);
+
+  // 第1-3集：入宫阶段
+  if (ep <= 3) {
+    return generateEarlyGameStory(state, flags, ep);
+  }
+  // 第4-10集：适应阶段
+  if (ep <= 10) {
+    return generateMidGameStory(state, flags, ep);
+  }
+  // 第10集以后
+  return generateLateGameStory(state, flags, ep);
 }
 
-function getStoryPool(episode: number, state: GameState, input: string): AIResponse[] {
-  const inputLower = input.toLowerCase();
+function generateEarlyGameStory(state: GameState, flags: Set<string>, ep: number): AIResponse {
+  const name = state.playerProfile.fullName;
 
-  if (episode === 1) {
-    if (inputLower.includes('不语') || inputLower.includes('退后') || inputLower.includes('沉默')) {
-      return [{
-        narration: `沈知意不动声色地退后半步，垂下眼帘。\n\n乌兰见她如此识趣，嗤笑一声，便不再理会。王嬷嬷的目光却在沈知意身上多停了一瞬——那种不卑不亢的沉静，倒让她想起了当年的德太妃。\n\n"今日起，你们便住在储秀宫东西配殿。"王嬷嬷继续说道，"三日后选秀面圣，在此之前，不得随意走动。"\n\n众秀女各自散去。沈知意走进分配给她的厢房，房间不大，但收拾得还算整洁。正整理行囊时，隔壁传来一阵轻轻的叩门声。\n\n门外站着一位面容清秀的少女，眉眼温柔，穿着素净的藕荷色褂子，微微福身道："姐姐好，我是你的邻房，佟佳氏云舒。初来乍到，想着与姐姐打个照面。"\n\n她的笑容真切，但沈知意注意到她的目光很快扫过了自己桌上的行囊——那里面有一封父亲的亲笔信。`,
-        choices: [
-          { id: 1, text: "热情相迎，邀她进来说话" },
-          { id: 2, text: "礼貌寒暄，但保持距离" },
-          { id: 3, text: "婉言谢绝，称自己要休息" },
-        ],
-        stat_changes: { scheming: 3, wisdom: 2 },
-        new_flags: ["met_yunshui", "entered_chuxiu_palace"],
-        episode_end: false,
-        ending: null,
-      }];
-    } else if (inputLower.includes('回应') || inputLower.includes('不卑') || inputLower.includes('笑')) {
-      return [{
-        narration: `沈知意抬起头，淡淡一笑，福了福身道："姐姐说笑了。贵气不贵气的，进了这宫门，大家都是天家的人，谁也不比谁贵上几分。"\n\n此话一出，周围几位秀女都暗暗侧目。乌兰的脸色微变，没料到这个汉军旗的丫头竟敢回嘴。王嬷嬷嘴角微不可查地动了一下。\n\n"你——"乌兰正要发作，身后一位年长的嬷嬷拉了拉她的袖子，低声道："小主，这里是储秀宫，不是科尔沁草原。"\n\n乌兰冷哼一声，拂袖而去。但沈知意分明看见她回头时那双眼睛里的寒意——她知道，自己刚刚在这后宫里，树了第一个敌人。\n\n回到厢房，沈知意取出父亲临别前塞给她的一封信。信封上只写了四个字："慎之又慎。"\n\n她刚要拆开，忽听院中传来一阵骚动——有人喊道："华妃娘娘驾到！"`,
-        choices: [
-          { id: 1, text: "赶紧出去跪迎华妃" },
-          { id: 2, text: "先收好信再出去" },
-          { id: 3, text: "躲在房中偷偷观望" },
-        ],
-        stat_changes: { favor: 2, scheming: 5, influence: 2, cruelty: 1 },
-        new_flags: ["offended_wulan", "entered_chuxiu_palace"],
-        episode_end: false,
-        ending: null,
-      }];
-    } else {
-      return [{
-        narration: `沈知意假装没有听到乌兰的话，转身恭恭敬敬地向王嬷嬷福了一礼："嬷嬷辛苦，请嬷嬷多多指教。"\n\n王嬷嬷微微颔首，目光中多了几分赞许："倒是个懂规矩的。"\n\n乌兰见沈知意不接茬，反而去讨好嬷嬷，一时竟也无从发作，只能悻悻地跟着众人往配殿走去。\n\n夜里，储秀宫安静下来。沈知意在烛光下取出随身带来的一本《女诫》——这是母亲特意让她带进宫的。书页间夹着一张薄纸，上面是父亲的笔迹，只有八个字：\n\n"不争则无过，无过则安。"\n\n她默念了两遍，将纸折好贴身收起。窗外月色如水，远处隐约传来宫墙后的丝竹声。\n\n忽然，隔壁传来压低的哭声。沈知意侧耳倾听——是一个年轻女子的啜泣，断断续续，满是恐惧。`,
-        choices: [
-          { id: 1, text: "过去敲门关心" },
-          { id: 2, text: "当作没听到，继续看书" },
-          { id: 3, text: "记在心里，明日再打听" },
-        ],
-        stat_changes: { wisdom: 3, scheming: 2, virtue: 3 },
-        new_flags: ["impressed_mammy_wang", "entered_chuxiu_palace"],
-        episode_end: false,
-        ending: null,
-      }];
-    }
+  if (!flags.has("chuxiu_intro_done")) {
+    return {
+      narration: `景隆二年，暮春三月。
+
+紫禁城的朱红大门在晨曦中缓缓开启，${name}随着一众秀女鱼贯而入。她不自觉地攥紧了手中的帕子——那是母亲临别时塞给她的，帕角绣着一朵素净的兰花。
+
+储秀宫院中，教导嬷嬷王氏面容冷峻："进了这道门，你们便不再是谁家的千金小姐。生死荣辱，全凭各人造化。"
+
+身旁一位衣着华贵的女子轻哼一声——是蒙古科尔沁部的博尔济吉特氏·乌兰。她瞥了你一眼，压低声音道："站远些。别沾了本小姐的贵气。"
+
+几双眼睛悄悄看向这边。${name}感到后背微微发凉。`,
+      choices: [
+        { id: 1, text: "垂眸不语，默默退后半步（隐忍，观察局势）", stat_changes: { wisdom: 3, scheming: 2 } },
+        { id: 2, text: "浅笑回礼，不卑不亢地回应（博弈，试探关系）", stat_changes: { cruelty: 2, influence: 2 } },
+        { id: 3, text: "消耗1点洞察力，解读乌兰的潜台词", stat_changes: { insight: -1 } },
+      ],
+      new_flags: ["chuxiu_intro_done"],
+      stat_changes: {},
+      episode_end: false,
+      ending: null,
+    };
   }
 
-  const generalPool: AIResponse[] = [
-    {
-      narration: `翌日清晨，储秀宫的钟声在薄雾中响起。沈知意早早起身梳洗，按照嬷嬷昨日教授的规矩，将发髻梳得一丝不苟。\n\n用过早膳，王嬷嬷将众秀女召至正殿，面色凝重道："今日皇后娘娘要来储秀宫巡视。尔等务必言行得体，若有失仪之处——"\n\n她没有说完，但众人都明白那未尽之意。\n\n巳时，一阵环佩叮当。皇后博尔济吉特氏·婉仪在众宫女的簇拥下款款而来。她容貌端丽，神色从容，一双凤眼带着审视的目光扫过每一位秀女。\n\n"这位是？"皇后在沈知意面前停下了脚步。\n\n"回娘娘，沈德山之女，沈知意。"王嬷嬷在一旁禀报。\n\n皇后微微颔首："沈少卿的女儿。你父亲在大理寺做事，素来清正。"\n\n所有人的目光都聚焦在沈知意身上。皇后似乎在等她说些什么。`,
+  if (!flags.has("met_yunshui")) {
+    return {
+      narration: `${name}走进分配给她的厢房，房间不大，但收拾得还算整洁。
+
+正整理行囊时，隔壁传来轻轻的叩门声。门外站着一位面容清秀的少女，眉眼温柔，穿着素净的藕荷色褂子，微微福身道："姐姐好，我是你的邻房，佟佳氏·云舒。初来乍到，想着与姐姐打个照面。"
+
+她的笑容真切，但${name}注意到她的目光很快扫过了自己桌上的行囊——那里面有一封父亲的亲笔信。`,
       choices: [
-        { id: 1, text: "谦虚回应，称父亲不过尽本分" },
-        { id: 2, text: "借机表忠心，称愿效忠皇后" },
-        { id: 3, text: "沉默恭敬，只行礼不多言" },
+        { id: 1, text: "热情相迎，邀她进来说话", stat_changes: { scheming: 2, wisdom: 1 } },
+        { id: 2, text: "礼貌寒暄，但保持距离", stat_changes: { scheming: 3, wisdom: 2 } },
+        { id: 3, text: "婉言谢绝，称自己要休息", stat_changes: { virtue: 3, scheming: 1 } },
       ],
-      stat_changes: { favor: 3, influence: 2 },
-      new_flags: ["met_empress"],
+      new_flags: ["met_yunshui"],
+      stat_changes: {},
       episode_end: false,
       ending: null,
-    },
-    {
-      narration: `入夜，一阵急促的脚步声打破了储秀宫的宁静。\n\n一个小太监匆匆跑来传话："万岁爷今晚要临幸储秀宫，各位小主速速准备！"\n\n一时间，整个院子都沸腾了。秀女们手忙脚乱地更衣梳妆，有人喜形于色，有人惶恐不安。\n\n沈知意的心也跳快了几拍。她从箱中取出母亲准备的一套月白色绣兰花的褂子——素净，但做工精致。\n\n云舒从隔壁走过来，面带担忧："知意姐姐，听说皇上最近心情不好，前朝有人弹劾了好几位大臣……万一问起朝事，我们该如何应对？"\n\n沈知意正在思索，乌兰却已经盛装打扮完毕，浓妆艳抹地走出来，冷冷道："问什么朝事？侍奉圣驾，只需讨皇上欢心便是。有些人啊，既不懂风情，又没有家世，就别痴心妄想了。"\n\n远处，灯笼的光芒逐渐逼近。`,
+    };
+  }
+
+  if (!flags.has("huafei_visit")) {
+    return {
+      narration: `回到厢房，${name}取出父亲临别前塞给她的一封信。信封上只写了四个字："慎之又慎。"
+
+她刚要拆开，忽听院中传来一阵骚动——有人喊道："华妃娘娘驾到！"
+
+${name}的心猛地一跳。华妃，钮祜禄氏·瑞华，将门之后，性烈骄纵，宠冠后宫……
+
+她该怎么做？`,
       choices: [
-        { id: 1, text: "淡妆素裹，以才情取胜" },
-        { id: 2, text: "刻意回避，不去争宠" },
-        { id: 3, text: "暗中观察其他人的表现" },
+        { id: 1, text: "赶紧出去跪迎华妃", stat_changes: { favor: 2, scheming: 1 } },
+        { id: 2, text: "先收好信再出去", stat_changes: { scheming: 3, wisdom: 2 } },
+        { id: 3, text: "消耗1点洞察力，感知华妃来意", stat_changes: { insight: -1 } },
       ],
-      stat_changes: { scheming: 3, favor: 2 },
-      new_flags: ["emperor_visit_chuxiu"],
+      new_flags: ["huafei_visit"],
+      stat_changes: {},
       episode_end: false,
       ending: null,
-    },
-    {
-      narration: `三日后，选秀的日子到了。\n\n太和殿前，秀女们按照旗籍排成两列。沈知意站在汉军旗的队伍中，前面是满洲旗和蒙古旗的秀女——她们的位置总是靠前一些。\n\n景隆帝端坐龙椅之上，面容俊朗但不怒自威。他看起来不过三十许人，眉宇间却有着与年龄不符的深沉。\n\n"沈氏。"点名的声音忽然响起。\n\n沈知意深吸一口气，走上前去，按照礼仪端正地跪拜。她能感受到头顶那道目光的重量。\n\n"朕听闻你善画？"景隆帝忽然问道。\n\n沈知意一愣——她确实自幼学画，但这事并不为外人所知。是谁告诉皇上的？\n\n"回皇上，臣女……略通丹青，不敢言善。"她低头答道。\n\n"不必谦虚。"景隆帝的声音里带着一丝玩味，"朕案头恰好有一幅画，缺了题诗。你来看看。"\n\n大殿内一阵低低的议论声。`,
+    };
+  }
+
+  if (!flags.has("audition_done")) {
+    return {
+      narration: `三日后，选秀的日子到了。
+
+太和殿前，秀女们按照旗籍排成两列。景隆帝端坐龙椅之上，面容俊朗但不怒自威。
+
+"沈氏。"点名的声音忽然响起。
+
+${name}深吸一口气，走上前去，按照礼仪端正地跪拜。她能感受到头顶那道目光的重量。
+
+"朕听闻你善画？"景隆帝忽然问道。
+
+${name}一愣——她确实自幼学画，但这事并不为外人所知。是谁告诉皇上的？
+
+"回皇上，臣女……略通丹青，不敢言善。"她低头答道。
+
+"不必谦虚。"景隆帝的声音里带着一丝玩味，"朕案头恰好有一幅画，缺了题诗。你来看看。"`,
       choices: [
-        { id: 1, text: "大方上前，展露才学" },
-        { id: 2, text: "推辞才疏，请皇上另选高明" },
-        { id: 3, text: "含蓄应承，先看画再决定" },
+        { id: 1, text: "大方上前，展露才学", stat_changes: { favor: 5, wisdom: 3 } },
+        { id: 2, text: "推辞才疏，请皇上另选高明", stat_changes: { virtue: 3, wisdom: 2 } },
+        { id: 3, text: "含蓄应承，先看画再决定", stat_changes: { scheming: 3, favor: 2 } },
       ],
-      stat_changes: { favor: 5, wisdom: 3, influence: 2 },
-      new_flags: ["emperor_noticed", "painting_event"],
+      new_flags: ["audition_done"],
+      stat_changes: {},
       episode_end: true,
       ending: null,
-    },
-    {
-      narration: `月色下的御花园，比白日更添了几分幽静。\n\n沈知意本不该出现在这里——夜间御花园不许宫人随意走动。但她收到了一张字条，约她亥时在牡丹亭相见，落款是一个她不认识的印记。\n\n牡丹亭的石桌上放着一盏冷茶，旁边坐着一个太监模样的人。看见沈知意，他站起来行了个礼："沈小主，我家主子让我带句话。"\n\n"你家主子是……？"\n\n"淑嫔娘娘。"太监压低声音，"娘娘说，华妃近日要对新入宫的秀女下手。她已经查到，上个月那位赵秀女的'暴病'，并非天意。"\n\n沈知意的心猛地揪紧了。赵秀女就住在她隔壁，一周前忽然'病故'被抬出宫，大家都以为是水土不服……\n\n"娘娘说，您是聪明人。这后宫里，一个人活不长。"太监说完，将一个小瓷瓶放在桌上，转身消失在夜色中。\n\n小瓷瓶里是什么？沈知意盯着它，手指微微发抖。`,
+    };
+  }
+
+  return {
+    narration: `选秀尘埃落定。
+
+${name}被封为采女，搬入了延禧宫的偏殿。消息传回沈家，父亲沈大人终于松了口气——能在第一次选秀便入选，已是不易。
+
+然而后宫的水，比她想象的还要深。
+
+这日，王嬷嬷悄悄来访，压低声音道："小主，奴婢有句话不知当讲不当讲……华妃娘娘那边，似乎对小主有些不满。"
+
+${name}的心沉了下去。她知道，树欲静而风不止。`,
+    choices: [
+      { id: 1, text: "请王嬷嬷细说（探听华妃动向）", stat_changes: { scheming: 3, insight: 2 } },
+      { id: 2, text: "淡然处之，先观察再说", stat_changes: { wisdom: 3, virtue: 2 } },
+      { id: 3, text: "主动出击，去拜访华妃", stat_changes: { cruelty: 3, favor: -3 } },
+    ],
+    new_flags: ["court_entering"],
+    stat_changes: {},
+    episode_end: true,
+    ending: null,
+  };
+}
+
+function generateMidGameStory(state: GameState, flags: Set<string>, ep: number): AIResponse {
+  const name = state.playerProfile.fullName;
+
+  if (flags.has("court_entering") && !flags.has("empress_meeting")) {
+    return {
+      narration: `这日午后，坤宁宫的小太监忽然来传话："皇后娘娘请沈采女过去说话。"
+
+${name}心中一凛。皇后的召见，往往意味着后宫的格局即将变动。
+
+坤宁宫内，博尔济吉特氏·婉仪端坐凤椅，面容端丽，神色从容。她的目光在${name}身上停留片刻，缓缓开口："沈采女，你入宫也有些时日了。本宫听闻，你与华妃似乎有些不愉快？"
+
+这是一个陷阱，还是一个机会？`,
       choices: [
-        { id: 1, text: "拿走瓷瓶，回去仔细查验" },
-        { id: 2, text: "不碰瓷瓶，假装没来过" },
-        { id: 3, text: "将此事告知王嬷嬷" },
+        { id: 1, text: "坦言相告，试探皇后态度", stat_changes: { scheming: 3, influence: 2 } },
+        { id: 2, text: "避重就轻，只称一切安好", stat_changes: { virtue: 3, scheming: 1 } },
+        { id: 3, text: "消耗1点洞察力，分析皇后真实意图", stat_changes: { insight: -1 } },
       ],
-      stat_changes: { scheming: 5, health: -5, wisdom: 3 },
+      new_flags: ["empress_meeting"],
+      stat_changes: {},
+      episode_end: ep % 3 === 0,
+      ending: null,
+    };
+  }
+
+  if (flags.has("empress_meeting") && !flags.has("shupin_contact")) {
+    return {
+      narration: `月色下的御花园，比白日更添了几分幽静。
+
+${name}本不该出现在这里——夜间御花园不许宫人随意走动。但她收到了一张字条，约她亥时在牡丹亭相见，落款是一个她不认识的印记。
+
+牡丹亭的石桌上放着一盏冷茶，旁边坐着一个太监模样的人："沈小主，淑嫔娘娘让我带句话。华妃近日要对新入宫的秀女下手。上个月的赵秀女……并非病故。"
+
+${name}的心猛地揪紧了。赵秀女就住在她隔壁，一周前忽然"病故"被抬出宫……
+
+太监将一个小瓷瓶放在桌上，转身消失在夜色中。`,
+      choices: [
+        { id: 1, text: "拿走瓷瓶，回去仔细查验", stat_changes: { scheming: 4, health: -3 } },
+        { id: 2, text: "不碰瓷瓶，假装没来过", stat_changes: { wisdom: 3, virtue: 2 } },
+        { id: 3, text: "将此事告知王嬷嬷", stat_changes: { scheming: 2, influence: 2 } },
+      ],
       new_flags: ["shupin_contact", "huafei_threat"],
-      episode_end: false,
+      stat_changes: {},
+      episode_end: ep % 3 === 0,
       ending: null,
+    };
+  }
+
+  const midPool = [
+    {
+      narration: `翌日清晨，延禧宫的小太监匆匆跑来："沈采女，华妃娘娘请您过去一趟。"
+
+${name}的心沉了沉。自从入宫以来，她还从未与华妃正面打过交道。但宫里的风言风语她也有所耳闻——华妃性烈骄纵，得罪她的人，往往没有好下场。
+
+她该如何应对这场可能的鸿门宴？`,
+      choices: [
+        { id: 1, text: "欣然赴约，以退为进", stat_changes: { scheming: 4, favor: -2 } },
+        { id: 2, text: "称病拖延，争取准备时间", stat_changes: { wisdom: 3, scheming: 2 } },
+        { id: 3, text: "消耗1点洞察力，感知此行吉凶", stat_changes: { insight: -1 } },
+      ],
+      new_flags: ["huafei_invitation"],
     },
     {
-      narration: `连日的阴雨终于停了。\n\n沈知意被提升为采女后，搬入了延禧宫的偏殿。虽然只是一间小小的厢房，但终究比储秀宫的大通铺强了不少。\n\n然而好景不长。这日晨起，贴身宫女香芹端来早膳，面色苍白地附耳道："小主，奴婢听说……华妃娘娘昨晚在皇上面前提起您了。"\n\n"说了什么？"\n\n"说……说您的父亲沈大人，在朝上弹劾了华妃兄长的旧部。华妃娘娘很不高兴。"\n\n沈知意放下筷子。前朝后宫，果然盘根错节。父亲在大理寺的一举一动，都会影响她在后宫的处境。\n\n正说着，外面传来传唤的声音——皇后娘娘要见她。\n\n"来的好快。"沈知意喃喃道。她知道，皇后召见绝非好意，但也不会是坏事。在这后宫里，每个人都是棋子，关键是看你被谁执子。`,
+      narration: `入夜，一阵急促的脚步声打破了延禧宫的宁静。
+
+一个小太监匆匆跑来传话："万岁爷今晚临幸延禧宫，沈采女速速准备！"
+
+一时间，整个院子都沸腾了。贴身宫女香芹手忙脚乱地帮${name}更衣梳妆。
+
+"小主，这可是千载难逢的机会啊！"香芹兴奋道。
+
+${name}却心中忐忑。皇恩浩荡，却也伴君如伴虎……`,
       choices: [
-        { id: 1, text: "坦然赴约，见招拆招" },
-        { id: 2, text: "先打听皇后近况再去" },
-        { id: 3, text: "称病拖延，争取时间" },
+        { id: 1, text: "精心打扮，全力争取侍寝", stat_changes: { favor: 5, cruelty: 2 } },
+        { id: 2, text: "淡妆素裹，以才情取胜", stat_changes: { favor: 3, wisdom: 2 } },
+        { id: 3, text: "故意素净，降低存在感", stat_changes: { virtue: 3, scheming: 2 } },
       ],
-      stat_changes: { influence: 3, scheming: 2, favor: -2 },
-      new_flags: ["court_politics_entangled"],
-      episode_end: false,
-      ending: null,
+      new_flags: ["emperor_visit"],
     },
   ];
 
-  return generalPool;
+  const story = midPool[Math.floor(Math.random() * midPool.length)];
+  return { ...story, stat_changes: {}, episode_end: false, ending: null };
 }
+
+function generateLateGameStory(state: GameState, flags: Set<string>, ep: number): AIResponse {
+  const name = state.playerProfile.fullName;
+
+  if (state.stats.dread >= 90) {
+    return {
+      narration: `${name}躺在床上，感到一阵剧痛从腹部蔓延至全身。
+
+太医匆匆赶来，却只能摇头叹息。
+
+"是鸩毒。"王嬷嬷的声音在耳边响起，带着一丝悲凉，"小主，皇上的忌惮……终于化作了杀心。"
+
+${name}的眼前渐渐模糊。她想起了父亲临别时的话——"慎之又慎"……但终究，还是没能逃过这深宫的算计。`,
+      choices: [],
+      stat_changes: {},
+      new_flags: [],
+      episode_end: true,
+      ending: "death_poison",
+    };
+  }
+
+  if (state.stats.san <= 10) {
+    return {
+      narration: `${name}坐在窗前，目光呆滞。
+
+那些后宫的算计、尔虞我诈、日日夜夜的精神紧绷……终于在这一刻，压垮了她最后的理智。
+
+"一、二、三……"她开始无意识地数着什么，手指发白。
+
+宫女们面面相觑——沈采女，似乎疯了。`,
+      choices: [],
+      stat_changes: {},
+      new_flags: [],
+      episode_end: true,
+      ending: "suicide",
+    };
+  }
+
+  return {
+    narration: `景隆${2 + Math.floor(ep / 10)}年，后宫的格局悄然变化。
+
+${name}已从当年的采女，成长为一位不容小觑的存在。然而后宫的水，永远比表面看起来的要深。
+
+这日，有人悄悄递来一张纸条："太后有请。"
+
+纸条上没有落款，但${name}知道，能以太后的名义传话的人，后宫之中屈指可数。太后的召见，是福是祸？`,
+    choices: [
+      { id: 1, text: "立即前往，不敢有丝毫怠慢", stat_changes: { virtue: 3, influence: 2 } },
+      { id: 2, text: "先打听太后近况，再做决定", stat_changes: { scheming: 4, wisdom: 2 } },
+      { id: 3, text: "消耗1点洞察力，揣摩太后意图", stat_changes: { insight: -1 } },
+    ],
+    new_flags: [`taihou_audience_${ep}`],
+    stat_changes: {},
+    episode_end: ep % 5 === 0,
+    ending: null,
+  };
+}
+

@@ -12,8 +12,8 @@ export async function POST(req: Request) {
     return new Response(JSON.stringify({ error: 'Invalid request body' }), { status: 400 });
   }
 
-  // 检查是否需要生成摘要
-  if (gameState.currentSection % 3 !== 0) {
+  // 从第5集开始生成摘要（提前至5集，原为11集）
+  if (gameState.currentEpisode < 5 || gameState.currentSection % 3 !== 0) {
     return new Response(JSON.stringify({ skipped: true, reason: 'Not at summary point' }), {
       headers: { 'Content-Type': 'application/json' },
     });

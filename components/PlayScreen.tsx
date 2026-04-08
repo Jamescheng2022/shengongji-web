@@ -183,7 +183,7 @@ export default function PlayScreen() {
 
         // 章节摘要生成：每3节自动生成一次（后台调用，不阻塞UI）
         const stateAfterApply = useGameStore.getState().gameState;
-        if (stateAfterApply && stateAfterApply.currentSection % 3 === 0 && stateAfterApply.currentEpisode > 10) {
+        if (stateAfterApply && stateAfterApply.currentSection % 3 === 0 && stateAfterApply.currentEpisode > 5) {
           useGameStore.getState().generateChapterSummary().catch(console.error);
         }
 
