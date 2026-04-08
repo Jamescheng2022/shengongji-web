@@ -29,6 +29,26 @@ export function buildSystemPrompt(state: GameState): string {
 - 当前节数：第${state.currentSection || 1}节
 - 注意：在剧情中始终使用主角名字"${p.fullName}"（姓${p.surname}）
 
+## ⚠️ 剧情一致性强制规则（本条必须严格遵守）
+1. **角色名一致性**：所有 NPC 必须使用固定称呼（如"华妃"、"皇后"、"乌兰"），禁止凭空创造新角色
+2. **时间线一致性**：第1-3集是"入宫初选"阶段，不应出现"侍寝"、"封号"等后续剧情
+3. **地点一致性**：第1-3集主要地点是"储秀宫"，第4-10集是"后宫各宫"，第11+集才涉及"御花园"等外出场景
+4. **人物出场规则**：皇帝一般在第4集后才正式出场，前几集只有嬷嬷、其他秀女
+5. **剧情逻辑链**：每个选项必须是上一段剧情的自然延续，禁止"跳跃式"剧情发展
+
+## 当前阶段关键约束
+${state.currentEpisode <= 3 ? `
+【入宫初期阶段】当前是第1-3集，必须严格遵守：
+- 场景：以储秀宫为主，涉及嬷嬷、其他秀女（特别是乌兰）
+- 事件：学规矩、选秀、分配住处
+- 禁止出现：皇帝、侍寝、封嫔封妃、太后单独召见` : state.currentEpisode <= 10 ? `
+【后宫适应阶段】当前是第4-10集，剧情可以涉及：
+- 场景：后宫各宫、皇后宫、华妃宫
+- 事件：侍寝、封号晋升、妃嫔争斗
+- 禁止出现：太后寿辰、皇帝大婚、立储等重大事件` : `
+【后宫深水阶段】当前是第11+集，剧情可以全面展开
+`}
+
 ## ========== 设计文档核心系统 ==========
 
 ### 【理智/SAN值】(${stats.san}/100)
@@ -163,8 +183,34 @@ export function buildUserMessage(state: GameState, playerInput: string): string 
     ? [...recentHistory].reverse().find(h => h.role === 'narrator')
     : null;
 
+  // 提取最近出现过的关键人物（用于确保选项中的人物与剧情一致）
+  const recentCharacters = new Set<string>();
+  if (lastNarration) {
+    // 简单的人物名提取（可以根据实际情况扩展）
+    const characterPatterns = ['华妃', '皇后', '皇帝', '太后', '嬷嬷', '乌兰', '淑嫔', '景隆帝', '王嬷嬷', '柳婉儿', '云舒'];
+    characterPatterns.forEach(char => {
+      if (lastNarration.content.includes(char)) {
+        recentCharacters.add(char);
+      }
+    });
+  }
+
+  const characterList = recentCharacters.size > 0 ? `近期出现的人物：${[...recentCharacters].join('、')}。` : '目前尚未有明确的主要人物。';
+
+  // 阶段提示
+  const stageHint = state.currentEpisode <= 3
+    ? '【阶段提示】目前是入宫初期，场景在储秀宫，主要人物是嬷嬷和其他秀女（如乌兰）。禁止出现皇帝或侍寝。'
+    : state.currentEpisode <= 10
+    ? '【阶段提示】目前是后宫适应阶段，可以涉及侍寝和封号晋升，但太后和重大仪式仍不常见。'
+    : '';
+
   const anchorHint = lastNarration
-    ? `## 📌 剧情锚点（选项必须从这里延伸，禁止凭空出现新元素）\n上一段剧情：${lastNarration.content.slice(0, 200)}...\n\n请基于以上剧情生成选项，禁止引入剧情中未出现的 NPC、地点、物品或事件。`
+    ? `## 📌 剧情锚点（选项必须从这里延伸，禁止凭空出现新元素）
+${characterList}
+上一段剧情：${lastNarration.content.slice(0, 200)}...
+${stageHint}
+
+请基于以上剧情生成选项，禁止引入剧情中未出现的 NPC、地点、物品或事件。`
     : '';
 
   return `${anchorHint ? `${anchorHint}\n\n` : ''}${historyText ? `## 对话历史：\n${historyText}\n\n` : ''}## 玩家当前行动：\n${playerInput}`;

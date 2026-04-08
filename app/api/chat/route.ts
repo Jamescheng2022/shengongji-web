@@ -50,14 +50,22 @@ export async function POST(req: Request) {
         // 返回下一节的 section（processAIResponse 需要这个值来递增）
         const nextSection = episodeEnd ? 1 : currentSection + 1;
         
+        // ========== 修复：跳过开场重复问题 ==========
+        // 如果是第1集第1节的第一个选择（开场已由客户端显示），直接返回下一场景
+        const isFirstChoice = gameState.history.length === 0 && currentSection === 1;
+        
+        // 确定返回哪个场景的叙述和选项
+        const displayScene = isFirstChoice && nextScene ? nextScene : currentScene;
+        const displayChoices = (isFirstChoice && nextScene) ? nextScene.choices : (nextScene || currentScene).choices;
+        
         // 转换为AI响应格式
         const response: AIResponse = {
-          title: currentScene.title,
+          title: displayScene.title,
           section: nextSection,
-          narration: currentScene.narration,
-          subtext: currentScene.subtext,
+          narration: displayScene.narration,
+          subtext: displayScene.subtext,
           stat_changes: selectedChoice?.stat_changes || {},
-          choices: (nextScene || currentScene).choices.map((c, i) => ({
+          choices: displayChoices.map((c, i) => ({
             id: i + 1,
             text: c.text,
             stat_changes: c.stat_changes,
